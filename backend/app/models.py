@@ -76,7 +76,37 @@ class S00_ErrorLog(Base):
     )
 
 
+class S00_ChatRateLimit(Base):
+    __tablename__ = "S00_chat_rate_limits"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("S00_users.id"), index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    message_count_minute: Mapped[int] = mapped_column(Integer, default=1)
+    message_count_day: Mapped[int] = mapped_column(Integer, default=1)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    day_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 # ===================== C00_ BOOKSTORE CONFIG & CATALOG =====================
+
+class C00_KnowledgeBase(Base):
+    __tablename__ = "C00_knowledge_base"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    topic: Mapped[str] = mapped_column(String(100), index=True)  # refund, shipping, gift_wrap, member_perks, tech_support, payment
+    question_en: Mapped[str] = mapped_column(String(255))
+    question_zh: Mapped[str] = mapped_column(String(255))
+    answer_en: Mapped[Text] = mapped_column(Text)
+    answer_zh: Mapped[Text] = mapped_column(Text)
+    keywords: Mapped[str] = mapped_column(String(300), index=True)  # search tags
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
 
 class C00_SiteSetting(Base):
     __tablename__ = "C00_site_settings"

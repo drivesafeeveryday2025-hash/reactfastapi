@@ -168,3 +168,27 @@ class OrderOut(BaseModel):
     items: list[OrderItemOut] = []
 
     model_config = {"from_attributes": True}
+
+
+# ===================== CHATBOT & KNOWLEDGE SCHEMAS =====================
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    intent: str
+    sources: list[str] = []
+
+
+class KnowledgeBaseOut(BaseModel):
+    id: int
+    topic: str
+    question_en: str
+    question_zh: str
+    answer_en: str
+    answer_zh: str
+    keywords: str
+
+    model_config = {"from_attributes": True}

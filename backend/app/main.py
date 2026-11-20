@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
-from . import auth, models, schemas
+from . import ai_service, auth, models, schemas
 from .database import Base, SessionLocal, engine, get_db
 
 # Automatically creates new tables (e.g. S00_login_logs, S00_activity_logs, S00_error_logs) in PostgreSQL
@@ -264,6 +265,62 @@ def trigger_test_error():
     """
     division_by_zero = 100 / 0
     return {"result": division_by_zero}
+
+
+# ===================== SECURE GROUNDED AI CHATBOT ENDPOINT =====================
+
+@app.post("/api/chat", response_model=schemas.ChatResponse)
+def handle_chat_message(
+    payload: schemas.ChatRequest,
+    request: Request,
+    current_user: models.S00_User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Secure Grounded AI Chatbot Endpoint:
+    1. Gated behind JWT auth (blocks 99% of web crawlers and scraping bots)
+    2. Enforces Rate Limiter (max 5 msgs/min, 40 msgs/day per user)
+    3. Grounded in PostgreSQL (answers policies, bestsellers, book recommendations without hallucinations)
+    4. Refuses password / sensitive data queries
+    """
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Enforce sliding-window rate limit
+    ai_service.enforce_chat_rate_limit(db, current_user.id, client_ip)
+
+    # Detect user language preference:
+    # If the customer writes in Chinese, answer in Chinese.
+    # If the customer writes in English, answer in English.
+    # Otherwise fallback to client UI / Accept-Language header.
+    accept_lang = request.headers.get("accept-language", "")
+    has_chinese = bool(re.search(r"[\u4e00-\u9fff]", payload.message))
+    has_english = bool(re.search(r"[a-zA-Z]{2,}", payload.message))
+
+    if has_chinese:
+        is_zh = True
+    elif has_english:
+        is_zh = False
+    else:
+        is_zh = "zh" in accept_lang.lower()
+
+    reply, intent, sources = ai_service.process_chat_message(db, payload.message, is_zh=is_zh)
+
+    # Record chat interaction in S00_activity_logs
+    db.add(
+        models.S00_ActivityLog(
+            user_id=current_user.id,
+            action="CHAT_QUERY",
+            entity_type="CHAT",
+            details=f"Intent: {intent} | Query: {payload.message[:100]}",
+            ip_address=client_ip,
+        )
+    )
+    db.commit()
+
+    return schemas.ChatResponse(reply=reply, intent=intent, sources=sources)
 
 
 # ===================== C00_ BOOKSTORE & BESTSELLER ENDPOINTS =====================

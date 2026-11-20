@@ -143,6 +143,7 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<Array<{ sender: "bot" | "user"; text: string }>>([]);
   const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
 
   // Track system activity helper
   function trackActivity(action: string, entity_type?: string, entity_id?: number, details?: string) {
@@ -340,7 +341,7 @@ export default function App() {
 
   async function handleSendChat(e: FormEvent) {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || chatLoading) return;
     const msg = chatInput.trim();
     const userMsg = { sender: "user" as const, text: msg };
     setChatInput("");
@@ -348,56 +349,73 @@ export default function App() {
 
     trackActivity("CHAT_QUERY", "CHAT", undefined, msg);
 
-    const lower = msg.toLowerCase();
+    if (!token) {
+      const loginNotice =
+        lang === "zh-TW"
+          ? "🔒 為了防範惡意網路爬蟲並保護服務品質，AI 客服助理僅開放給登入會員使用。請先登入您的帳號！"
+          : "🔒 To prevent automated web-bot abuse, the AI assistant is reserved for signed-in members. Please sign in first!";
+      setChatMessages((prev) => [...prev, { sender: "bot", text: loginNotice }]);
+      return;
+    }
 
-    // Check if customer asked about bestsellers / ranking
-    if (lower.includes("best") || lower.includes("bestsell") || lower.includes("rank") || lower.includes("熱銷") || lower.includes("暢銷") || lower.includes("排行")) {
-      try {
-        const r = await fetch(`${API_URL}/api/products/bestsellers?limit=5`);
-        if (r.ok) {
-          const bestsellers: Product[] = await r.json();
-          const list = bestsellers
-            .map((b, idx) => `${idx + 1}. 《${localize(b, "title")}》 - ${localize(b, "author")} ($${b.price.toFixed(2)})`)
-            .join("\n");
-          const reply =
+    setChatLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Accept-Language": lang,
+        },
+        body: JSON.stringify({ message: msg }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 429) {
+        // Rate limit burst/daily quota hit
+        const rateLimitMsg = `⚠️ ${data.detail || "Rate limit reached. Please wait before asking again."}`;
+        setChatMessages((prev) => [...prev, { sender: "bot", text: rateLimitMsg }]);
+      } else if (res.status === 401) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            sender: "bot",
+            text:
+              lang === "zh-TW"
+                ? "登入狀態已過期，請重新登入後再進行提問。"
+                : "Your session has expired. Please sign in again.",
+          },
+        ]);
+      } else if (!res.ok) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            sender: "bot",
+            text:
+              lang === "zh-TW"
+                ? "抱歉，目前客服系統忙碌中，請稍後再試。"
+                : "Sorry, our assistant is temporarily busy. Please try again shortly.",
+          },
+        ]);
+      } else {
+        setChatMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+      }
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: "bot",
+          text:
             lang === "zh-TW"
-              ? `這是文萃讀坊本門市的「真實銷售排行榜 Top 5」（純依本站訂單量統計，絕非外部網路隨機書籍）：\n\n${list}\n\n所有書籍皆為本店現貨在庫！`
-              : `Here are the official Top 5 bestsellers STRICTLY from Apex Book Haven's actual sales:\n\n${list}\n\nAll titles are currently in stock in our bookstore!`;
-          setChatMessages((prev) => [...prev, { sender: "bot", text: reply }]);
-          return;
-        }
-      } catch {}
+              ? "無法連線至書店伺服器，請確認後端運行中。"
+              : "Unable to reach bookstore server. Please verify backend is running.",
+        },
+      ]);
+    } finally {
+      setChatLoading(false);
     }
-
-    // Default intelligent localized responses
-    let botReply =
-      lang === "zh-TW"
-        ? "感謝您的諮詢！我們的選書師會為您推薦最適合的心靈讀物。"
-        : "Thank you for reaching out! Our literary curators are always here to assist.";
-
-    if (lower.includes("hour") || lower.includes("open") || lower.includes("營業") || lower.includes("時間")) {
-      botReply =
-        lang === "zh-TW"
-          ? `我們的營業時間為：${localize(settings, "opening_hours")}`
-          : `Our opening hours are: ${localize(settings, "opening_hours")}`;
-    } else if (lower.includes("shipping") || lower.includes("免運") || lower.includes("運費") || lower.includes("delivery")) {
-      botReply =
-        lang === "zh-TW"
-          ? "全館滿 $35 即享免費低碳直送！一般市區約 1-2 個工作天內抵達。"
-          : "We offer free carbon-neutral shipping on orders over $35! Delivery typically takes 1-2 business days.";
-    } else if (lower.includes("react") || lower.includes("tech") || lower.includes("code") || lower.includes("程式")) {
-      botReply =
-        lang === "zh-TW"
-          ? "本店科技類暢銷第 1 名為 Robert C. Martin 的《無瑕的程式碼 (Clean Code)》！若需要深入 React 實戰，也歡迎隨時向我們團隊洽詢。"
-          : "In our tech catalog, our #1 rated classic is 'Clean Code' by Robert C. Martin! If you need specific React architecture titles, feel free to ask our curators.";
-    } else if (lower.includes("location") || lower.includes("地址") || lower.includes("電話") || lower.includes("phone")) {
-      botReply =
-        lang === "zh-TW"
-          ? `門市地址位於：${localize(settings, "address")}，電話：${settings?.phone}`
-          : `We are located at: ${localize(settings, "address")}. Phone: ${settings?.phone}`;
-    }
-
-    setChatMessages((prev) => [...prev, { sender: "bot", text: botReply }]);
   }
 
   // --- REUSABLE HEADER CONTROLS ---
@@ -1587,6 +1605,22 @@ export default function App() {
                   {m.text}
                 </div>
               ))}
+              {chatLoading && (
+                <div
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-secondary)",
+                    padding: "8px 12px",
+                    borderRadius: 14,
+                    fontSize: 13,
+                    fontStyle: "italic",
+                    border: "1px solid var(--border-color)",
+                  }}
+                >
+                  {lang === "zh-TW" ? "📚 助理正在查詢書店資料庫..." : "📚 Assistant is checking catalog..."}
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleSendChat} style={{ display: "flex", borderTop: "1px solid var(--border-color)", padding: 10, background: "var(--bg-secondary)" }}>
@@ -1595,6 +1629,7 @@ export default function App() {
                 placeholder={t("chat_placeholder")}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                disabled={chatLoading}
                 style={{
                   flex: 1,
                   border: "1px solid var(--border-color)",
@@ -1608,14 +1643,15 @@ export default function App() {
               />
               <button
                 type="submit"
+                disabled={chatLoading}
                 style={{
                   marginLeft: 8,
                   padding: "8px 14px",
-                  background: "var(--accent)",
+                  background: chatLoading ? "var(--border-color)" : "var(--accent)",
                   color: "white",
                   border: "none",
                   borderRadius: 8,
-                  cursor: "pointer",
+                  cursor: chatLoading ? "not-allowed" : "pointer",
                   fontWeight: 700,
                   fontSize: 13,
                 }}

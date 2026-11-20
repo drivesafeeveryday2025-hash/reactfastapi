@@ -1,6 +1,8 @@
+from app.auth import hash_password
 from app.database import Base, SessionLocal, engine
 from app.models import (
     C00_Category,
+    C00_KnowledgeBase,
     C00_Order,
     C00_OrderItem,
     C00_ProdDetail,
@@ -16,12 +18,22 @@ Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
-# 1. System Roles
-db.add_all([
-    S00_Role(name="customer"),
-    S00_Role(name="admin"),
-    S00_Role(name="staff"),
-])
+# 1. System Roles & Demo Users
+role_cust = S00_Role(name="customer")
+role_admin = S00_Role(name="admin")
+role_staff = S00_Role(name="staff")
+db.add_all([role_cust, role_admin, role_staff])
+
+user_admin = S00_User(
+    email="admin@apex.local",
+    hashed_password=hash_password("admin123"),
+)
+user_customer = S00_User(
+    email="customer@apex.local",
+    hashed_password=hash_password("user123"),
+)
+db.add_all([user_admin, user_customer])
+db.flush()
 
 # 2. Site Settings (Bilingual: English & Traditional Chinese)
 db.add(
@@ -233,6 +245,77 @@ b6.detail = C00_ProdDetail(
 )
 
 db.add_all([b1, b2, b3, b4, b5, b6])
+db.flush()
+
+# 5. Sample Completed Orders & Sales Data (For grounded bestseller rankings)
+order1 = C00_Order(user_id=user_customer.id, total_amount=450.0, status="completed")
+db.add(order1)
+db.flush()
+db.add_all([
+    C00_OrderItem(order_id=order1.id, product_id=b3.id, quantity=15, unit_price=b3.price),  # Atomic Habits (15 sold)
+    C00_OrderItem(order_id=order1.id, product_id=b1.id, quantity=10, unit_price=b1.price),  # Clean Code (10 sold)
+    C00_OrderItem(order_id=order1.id, product_id=b5.id, quantity=8, unit_price=b5.price),   # The Little Prince (8 sold)
+    C00_OrderItem(order_id=order1.id, product_id=b2.id, quantity=6, unit_price=b2.price),   # DDIA (6 sold)
+    C00_OrderItem(order_id=order1.id, product_id=b6.id, quantity=5, unit_price=b6.price),   # Sapiens (5 sold)
+    C00_OrderItem(order_id=order1.id, product_id=b4.id, quantity=3, unit_price=b4.price),   # Deep Work (3 sold)
+])
+
+# 6. Unified Knowledge Base (FAQs & Store Policies)
+faq1 = C00_KnowledgeBase(
+    topic="refund_policy",
+    question_en="How do I return a damaged book or request a refund?",
+    question_zh="我的書有破損、缺頁或瑕疵，要怎麼退款退貨？",
+    answer_en="We offer a 7-day unconditional free return and replacement guarantee for any damaged or defective books. Please photograph the damaged pages/cover and contact us at service@apexbookhaven.com or call +886 (02) 2345-6789. We will arrange a free courier pick-up and issue a 100% full refund or dispatch a brand-new replacement within 24 hours.",
+    answer_zh="文萃讀坊提供【7 天瑕疵無條件免費退換貨】保障！若您收到的書籍有缺頁、破損、折損或髒污，請協助拍攝照片並寄至 service@apexbookhaven.com 或致電 (02) 2345-6789。我們將安排宅配免費到府收件，並在 24 小時內為您辦理全額退款或補寄全新書籍，您無須負擔任何運費。",
+    keywords="退款, 退貨, 破損, 瑕疵, 換貨, 壞掉, 缺頁, 折損, 補寄, refund, return, damaged, replace, broken",
+)
+
+faq2 = C00_KnowledgeBase(
+    topic="shipping_duration",
+    question_en="How long does delivery take and what is the shipping fee?",
+    question_zh="訂單一般多久送達？運費如何計算？",
+    answer_en="All orders over $35 enjoy complimentary carbon-neutral shipping! For orders under $35, a flat shipping fee of $4.50 applies. Delivery takes 1-2 business days in metropolitan areas and 2-3 business days for remote locations.",
+    answer_zh="全館單筆滿 $35 (約新台幣 1,100 元) 即享【低碳免運費】直送到府！未滿額酌收 $4.50 基礎運費。本島都會區下單後約 1-2 個工作天送達，偏遠或離島地區約 2-3 個工作天。",
+    keywords="運費, 配送, 送達, 時間, 多久, 幾天, 免運, 宅配, shipping, delivery, fee, time, courier",
+)
+
+faq3 = C00_KnowledgeBase(
+    topic="gift_service",
+    question_en="Can I buy a book as a gift for someone else? Do you offer gift wrapping?",
+    question_zh="可以送禮給朋友嗎？有提供包裝或卡片嗎？",
+    answer_en="Yes! At checkout, simply check 'Send as a Gift'. We provide complimentary artisanal Kraft paper wrapping and a handwritten greeting card with your personalized message, sealed with a classic wax seal bookmark.",
+    answer_zh="有的！文萃讀坊提供【免費文藝禮物包裝】。在購物車結帳時勾選「送禮包裝」，我們將使用進口牛皮紙與質感緞帶手工包裝，並附贈手寫祝賀卡片與專屬封蠟書籤，直接寄達收禮者手中。",
+    keywords="送禮, 禮物, 包裝, 卡片, 朋友, 祝賀, 生日, 緞帶, gift, wrap, present, card, wrapping",
+)
+
+faq4 = C00_KnowledgeBase(
+    topic="member_perks",
+    question_en="What are the benefits of becoming a member?",
+    question_zh="註冊成為會員有什麼好處與專屬權益？",
+    answer_en="Members enjoy: 1) Instant 10% discount on first purchase with code READ20, 2) Monthly free shipping coupons, 3) 48-hour early priority pre-orders for limited collector hardcovers, and 4) VIP invitations to author literary salons.",
+    answer_zh="文萃讀坊會員享有四大專屬禮遇：1) 註冊即享首購 9 折優惠；2) 每月贈送會員專屬免運券；3) 珍藏精裝限定版享有 48 小時優先預購權；4) 受邀參加每季作家線上與實體文學沙龍講座。",
+    keywords="會員, 好處, 權益, 折扣, 註冊, 優惠, 禮遇, member, perks, benefit, privilege, join",
+)
+
+faq5 = C00_KnowledgeBase(
+    topic="payment_support",
+    question_en="My payment failed or my credit card won't go through. What should I do?",
+    question_zh="線上刷卡失敗或付款系統異常，該如何處理？",
+    answer_en="We support Visa, MasterCard, Apple Pay, and Cash on Delivery (COD). If your card fails, it is usually a bank 3D-Secure SMS timeout. You can try another card or simply select 'Cash on Delivery' at checkout to pay safely when receiving your parcel.",
+    answer_zh="我們支援 Visa、MasterCard、Apple Pay 及「貨到付款 (COD)」。若刷卡失敗，通常為發卡銀行 3D 簡訊驗證逾時，建議更換卡片，或直接選擇「貨到付款」，包裹送達時直接將款項交付宅配員即可。",
+    keywords="付款, 信用卡, 刷卡, 失敗, 異常, 扣款, 貨到付款, 沒成功, payment, fail, credit card, cod, checkout",
+)
+
+faq6 = C00_KnowledgeBase(
+    topic="tech_support",
+    question_en="I am experiencing technical problems operating the website.",
+    question_zh="操作網站遇到技術問題或按鈕沒有反應，該怎麼辦？",
+    answer_en="Please try hard-refreshing your browser (Ctrl + F5 or Cmd + Shift + R) or opening in an Incognito private window. If the issue persists, our technical team is available 24/7 at tech@apexbookhaven.com.",
+    answer_zh="若按鈕無反應或畫面異常，建議您嘗試按下 Ctrl + F5 強制重新整理，或以無痕視窗開啟。若問題未解決，歡迎將畫面截圖寄至技術小組 tech@apexbookhaven.com，我們會在 1 小時內協助排除。",
+    keywords="技術, 網頁, 當機, 錯誤, 按鈕, 當掉, 不能按, 壞掉, technical, error, bug, crash, issue",
+)
+
+db.add_all([faq1, faq2, faq3, faq4, faq5, faq6])
 db.commit()
 db.close()
 print("BOOKSTORE_SEED_SUCCESS")
