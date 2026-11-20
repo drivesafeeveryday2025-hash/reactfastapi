@@ -1,0 +1,21 @@
+# Environment secrets (Never commit!)
+.env
+*.env
+.env.*
+
+# Python
+**/__pycache__/
+*.py[cod]
+.venv/
+*/.venv/
+
+# Node / React
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
