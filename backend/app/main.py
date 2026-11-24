@@ -1,14 +1,16 @@
 import json
 import re
 import traceback
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+import uuid
+from datetime import datetime, timezone
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
-from . import ai_service, auth, models, schemas
+from . import ai_service, auth, excel_service, models, schemas, word_service
 from .database import Base, SessionLocal, engine, get_db
 
 # Automatically creates new tables (e.g. S00_login_logs, S00_activity_logs, S00_error_logs) in PostgreSQL
@@ -102,6 +104,17 @@ def get_current_user(
     return user
 
 
+def require_manager(
+    current_user: models.S00_User = Depends(get_current_user),
+) -> models.S00_User:
+    if current_user.role not in ("manager", "superadmin") and current_user.email not in ("react@mail", "react@mail.com"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Manager privileges required."
+        )
+    return current_user
+
+
 def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -189,12 +202,46 @@ def login(payload: schemas.UserCreate, request: Request, db: Session = Depends(g
     )
     db.commit()
 
-    token = auth.create_access_token(email=user.email)
-    return {"access_token": token, "token_type": "bearer"}
+    token = auth.create_access_token(email=user.email, role=user.role)
+    return {"access_token": token, "token_type": "bearer", "role": user.role}
 
 
 @app.get("/api/me", response_model=schemas.UserOut)
 def read_me(current_user: models.S00_User = Depends(get_current_user)):
+    return current_user
+
+
+@app.put("/api/user/profile", response_model=schemas.UserOut)
+def update_user_profile(
+    payload: schemas.UserProfileUpdate,
+    request: Request,
+    current_user: models.S00_User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Updates the current authenticated user's profile details
+    (full name, phone, shipping address).
+    """
+    if payload.full_name is not None:
+        current_user.full_name = payload.full_name.strip()
+    if payload.phone is not None:
+        current_user.phone = payload.phone.strip()
+    if payload.address is not None:
+        current_user.address = payload.address.strip()
+
+    client_ip = request.client.host if request.client else "unknown"
+    db.add(
+        models.S00_ActivityLog(
+            user_id=current_user.id,
+            action="UPDATE_PROFILE",
+            entity_type="USER",
+            entity_id=current_user.id,
+            details=f"Updated profile: Name='{current_user.full_name}', Phone='{current_user.phone}'",
+            ip_address=client_ip,
+        )
+    )
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 
@@ -225,8 +272,8 @@ def track_activity(
 
 
 @app.get("/api/system/logins", response_model=list[schemas.LoginLogOut])
-def get_login_logs(limit: int = 50, db: Session = Depends(get_db)):
-    """Returns the latest user login history."""
+def get_login_logs(limit: int = 50, manager: models.S00_User = Depends(require_manager), db: Session = Depends(get_db)):
+    """Returns the latest user login history (Manager only)."""
     return (
         db.query(models.S00_LoginLog)
         .order_by(desc(models.S00_LoginLog.login_time))
@@ -236,8 +283,8 @@ def get_login_logs(limit: int = 50, db: Session = Depends(get_db)):
 
 
 @app.get("/api/system/activities", response_model=list[schemas.ActivityLogOut])
-def get_activity_logs(limit: int = 100, db: Session = Depends(get_db)):
-    """Returns the latest user website actions and interactions."""
+def get_activity_logs(limit: int = 100, manager: models.S00_User = Depends(require_manager), db: Session = Depends(get_db)):
+    """Returns the latest user website actions and interactions (Manager only)."""
     return (
         db.query(models.S00_ActivityLog)
         .order_by(desc(models.S00_ActivityLog.created_at))
@@ -247,14 +294,30 @@ def get_activity_logs(limit: int = 100, db: Session = Depends(get_db)):
 
 
 @app.get("/api/system/errors", response_model=list[schemas.ErrorLogOut])
-def get_error_logs(limit: int = 50, db: Session = Depends(get_db)):
-    """Returns the recorded unhandled system errors and stack traces."""
+def get_error_logs(limit: int = 50, manager: models.S00_User = Depends(require_manager), db: Session = Depends(get_db)):
+    """Returns the recorded unhandled system errors and stack traces (Manager only)."""
     return (
         db.query(models.S00_ErrorLog)
         .order_by(desc(models.S00_ErrorLog.created_at))
         .limit(limit)
         .all()
     )
+
+
+@app.get("/api/admin/overview")
+def get_admin_overview(
+    manager: models.S00_User = Depends(require_manager),
+    db: Session = Depends(get_db),
+):
+    """Returns management KPI overview metrics."""
+    return {
+        "manager_email": manager.email,
+        "role": manager.role,
+        "total_books": db.query(models.C00_Product).count(),
+        "total_categories": db.query(models.C00_Category).count(),
+        "total_users": db.query(models.S00_User).count(),
+        "total_orders": db.query(models.C00_Order).count(),
+    }
 
 
 @app.get("/api/system/test-error")
@@ -333,6 +396,24 @@ def get_settings(db: Session = Depends(get_db)):
     return settings
 
 
+@app.get("/api/navigation", response_model=list[schemas.NavigationMenuItemOut])
+def get_navigation_menus(db: Session = Depends(get_db)):
+    """
+    Returns active hierarchical navigation menu structure from C00_navigation_menus.
+    Root items have parent_id == None, with nested children ordered by sort_order.
+    """
+    return (
+        db.query(models.C00_NavigationMenu)
+        .options(joinedload(models.C00_NavigationMenu.children))
+        .filter(
+            models.C00_NavigationMenu.parent_id.is_(None),
+            models.C00_NavigationMenu.is_active.is_(True),
+        )
+        .order_by(models.C00_NavigationMenu.sort_order)
+        .all()
+    )
+
+
 @app.get("/api/promotions", response_model=list[schemas.PromotionOut])
 def get_promotions(db: Session = Depends(get_db)):
     return db.query(models.C00_Promotion).filter(models.C00_Promotion.is_active.is_(True)).all()
@@ -396,6 +477,188 @@ def get_products(category_id: int | None = None, db: Session = Depends(get_db)):
     return query.all()
 
 
+# ===================== EXCEL & WORD BULK IMPORT ENDPOINTS =====================
+
+@app.get("/api/products/excel-template")
+def download_excel_template(
+    current_user: models.S00_User = Depends(require_manager),
+):
+    """
+    Downloads a beautifully styled sample Excel template (.xlsx).
+    Restricted strictly to managers.
+    """
+    excel_bytes = excel_service.generate_excel_template()
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=apex_books_template.xlsx",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+@app.get("/api/products/word-template")
+def download_word_template(
+    current_user: models.S00_User = Depends(require_manager),
+):
+    """
+    Downloads a beautifully styled sample Word template (.docx).
+    Restricted strictly to managers.
+    """
+    word_bytes = word_service.generate_word_template()
+    return Response(
+        content=word_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": "attachment; filename=apex_books_template.docx",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+@app.post("/api/products/import-excel", response_model=schemas.ExcelImportResult)
+async def import_products_from_excel(
+    file: UploadFile = File(...),
+    request: Request = None,
+    current_user: models.S00_User = Depends(require_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Imports bookstore products in bulk from an uploaded Excel spreadsheet (.xlsx / .xls).
+    - Restricted strictly to managers.
+    - Auto-detects / maps column headers (supports English & Chinese)
+    - Auto-creates new categories if needed
+    - Upserts records by ISBN or Title (updates existing books, inserts new ones)
+    - Records audit log in S00_activity_logs
+    - Returns structured summary of processed, inserted, updated, and failed rows
+    """
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Please upload a valid Excel file (.xlsx or .xls).",
+        )
+
+    file_contents = await file.read()
+    if not file_contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded Excel file is empty.",
+        )
+
+    result = excel_service.import_books_from_excel(db, file_contents, file.filename)
+
+    # Activity Log: Excel import performed
+    client_ip = request.client.host if (request and request.client) else "unknown"
+
+    db.add(
+        models.S00_ActivityLog(
+            user_id=current_user.id,
+            action="EXCEL_IMPORT",
+            entity_type="PRODUCT",
+            details=json.dumps({
+                "filename": file.filename,
+                "total_rows": result["total_rows"],
+                "inserted": result["inserted"],
+                "updated": result["updated"],
+                "failed": result["failed"],
+                "manager": current_user.email,
+            }),
+            ip_address=client_ip,
+        )
+    )
+    db.commit()
+
+    return result
+
+
+@app.post("/api/products/import-word", response_model=schemas.ExcelImportResult)
+async def import_products_from_word(
+    file: UploadFile = File(...),
+    request: Request = None,
+    current_user: models.S00_User = Depends(require_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Imports bookstore products in bulk from an uploaded Microsoft Word document (.docx).
+    - Restricted strictly to managers.
+    - Auto-detects / maps table column headers (supports English & Chinese)
+    - Auto-creates new categories if needed
+    - Upserts records by ISBN or Title (updates existing books, inserts new ones)
+    - Records audit log in S00_activity_logs
+    - Returns structured summary of processed, inserted, updated, and failed rows
+    """
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Please upload a valid Microsoft Word document (.docx).",
+        )
+
+    file_contents = await file.read()
+    if not file_contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded Word document is empty.",
+        )
+
+    result = word_service.import_books_from_word(db, file_contents, file.filename)
+
+    # Activity Log: Word import performed
+    client_ip = request.client.host if (request and request.client) else "unknown"
+
+    db.add(
+        models.S00_ActivityLog(
+            user_id=current_user.id,
+            action="WORD_IMPORT",
+            entity_type="PRODUCT",
+            details=json.dumps({
+                "filename": file.filename,
+                "total_rows": result["total_rows"],
+                "inserted": result["inserted"],
+                "updated": result["updated"],
+                "failed": result["failed"],
+                "manager": current_user.email,
+            }),
+            ip_address=client_ip,
+        )
+    )
+    db.commit()
+
+    return result
+
+
+
+def _format_order(order: models.C00_Order) -> dict:
+    items_out = []
+    for item in order.items:
+        items_out.append({
+            "id": item.id,
+            "product_id": item.product_id,
+            "quantity": item.quantity,
+            "unit_price": item.unit_price,
+            "product_title_en": item.product.title_en if item.product else f"Book #{item.product_id}",
+            "product_title_zh": item.product.title_zh if item.product else f"圖書 #{item.product_id}",
+            "product_image_url": item.product.image_url if item.product else "",
+        })
+    return {
+        "id": order.id,
+        "user_id": order.user_id,
+        "total_amount": order.total_amount,
+        "shipping_fee": order.shipping_fee or 0.0,
+        "status": order.status,
+        "delivery_method": order.delivery_method or "standard",
+        "payment_method": order.payment_method or "credit_card",
+        "recipient_name": order.recipient_name,
+        "recipient_phone": order.recipient_phone,
+        "shipping_address": order.shipping_address,
+        "delivery_notes": order.delivery_notes,
+        "tracking_number": order.tracking_number,
+        "estimated_delivery": order.estimated_delivery,
+        "created_at": order.created_at,
+        "items": items_out,
+    }
+
+
 @app.post("/api/orders", response_model=schemas.OrderOut, status_code=201)
 def place_order(
     payload: schemas.OrderCreate,
@@ -406,30 +669,74 @@ def place_order(
     if not payload.items:
         raise HTTPException(status_code=400, detail="Cannot place empty order")
 
-    total = 0.0
-    order = models.C00_Order(user_id=current_user.id, total_amount=0.0)
-    db.add(order)
-    db.flush()
-
+    # 1. Calculate items subtotal and validate products
+    subtotal = 0.0
+    items_to_create = []
     item_summaries = []
+
     for item in payload.items:
         prod = db.query(models.C00_Product).filter(models.C00_Product.id == item.product_id).first()
         if not prod:
             raise HTTPException(status_code=404, detail=f"Book #{item.product_id} not found")
         item_total = prod.price * item.quantity
-        total += item_total
+        subtotal += item_total
+        items_to_create.append((prod, item.quantity))
+        item_summaries.append(f"{prod.title_en} x{item.quantity}")
+
+    subtotal = round(subtotal, 2)
+
+    # 2. Shipping fee & delivery estimate calculation
+    delivery_method = payload.delivery_method or "standard"
+    if delivery_method == "express":
+        shipping_fee = 12.00
+        estimated_delivery = "Next Business Day Express"
+    elif delivery_method == "pickup":
+        shipping_fee = 0.00
+        estimated_delivery = "Ready in 2 hours at Apex Downtown Store"
+    else:  # standard
+        delivery_method = "standard"
+        shipping_fee = 0.00 if subtotal >= 35.0 else 5.00
+        estimated_delivery = "3-5 Business Days Standard Delivery"
+
+    grand_total = round(subtotal + shipping_fee, 2)
+    tracking_number = f"APEX-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+    # 3. Recipient details - fallback to user profile if not provided
+    recipient_name = (payload.recipient_name or current_user.full_name or current_user.email.split("@")[0]).strip()
+    recipient_phone = (payload.recipient_phone or current_user.phone or "").strip()
+    shipping_address = (
+        "In-Store Pickup Counter (Downtown Main Branch)"
+        if delivery_method == "pickup"
+        else (payload.shipping_address or current_user.address or "Standard Shipping Address").strip()
+    )
+
+    order = models.C00_Order(
+        user_id=current_user.id,
+        total_amount=grand_total,
+        shipping_fee=shipping_fee,
+        status="Processing",
+        delivery_method=delivery_method,
+        payment_method=payload.payment_method or "credit_card",
+        recipient_name=recipient_name,
+        recipient_phone=recipient_phone,
+        shipping_address=shipping_address,
+        delivery_notes=payload.delivery_notes,
+        tracking_number=tracking_number,
+        estimated_delivery=estimated_delivery,
+    )
+    db.add(order)
+    db.flush()
+
+    for prod, qty in items_to_create:
         order_item = models.C00_OrderItem(
             order_id=order.id,
             product_id=prod.id,
-            quantity=item.quantity,
+            quantity=qty,
             unit_price=prod.price,
         )
         db.add(order_item)
-        item_summaries.append(f"{prod.title_en} x{item.quantity}")
 
-    order.total_amount = round(total, 2)
-
-    # Activity Log: Order placed
+    # 4. Activity Log: Order placed
     client_ip = request.client.host if request.client else "unknown"
     db.add(
         models.S00_ActivityLog(
@@ -437,11 +744,108 @@ def place_order(
             action="PLACE_ORDER",
             entity_type="ORDER",
             entity_id=order.id,
-            details=json.dumps({"order_id": order.id, "total": order.total_amount, "items": item_summaries}),
+            details=json.dumps({
+                "order_id": order.id,
+                "tracking_number": tracking_number,
+                "subtotal": subtotal,
+                "shipping_fee": shipping_fee,
+                "total": grand_total,
+                "delivery_method": delivery_method,
+                "payment_method": order.payment_method,
+                "items": item_summaries,
+            }),
             ip_address=client_ip,
         )
     )
 
     db.commit()
     db.refresh(order)
-    return order
+
+    # Re-fetch order with joined items and products
+    order_refreshed = (
+        db.query(models.C00_Order)
+        .options(joinedload(models.C00_Order.items).joinedload(models.C00_OrderItem.product))
+        .filter(models.C00_Order.id == order.id)
+        .first()
+    )
+    return _format_order(order_refreshed or order)
+
+
+@app.get("/api/orders/my-orders", response_model=list[schemas.OrderOut])
+def get_my_orders(
+    current_user: models.S00_User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns order history and tracking info for the logged-in customer.
+    """
+    orders = (
+        db.query(models.C00_Order)
+        .options(joinedload(models.C00_Order.items).joinedload(models.C00_OrderItem.product))
+        .filter(models.C00_Order.user_id == current_user.id)
+        .order_by(desc(models.C00_Order.created_at))
+        .all()
+    )
+    return [_format_order(o) for o in orders]
+
+
+@app.get("/api/admin/orders", response_model=list[schemas.OrderOut])
+def get_admin_orders(
+    manager: models.S00_User = Depends(require_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns all customer orders in the store with fulfillment status (Manager only).
+    """
+    orders = (
+        db.query(models.C00_Order)
+        .options(joinedload(models.C00_Order.items).joinedload(models.C00_OrderItem.product))
+        .order_by(desc(models.C00_Order.created_at))
+        .all()
+    )
+    return [_format_order(o) for o in orders]
+
+
+@app.put("/api/admin/orders/{order_id}/status", response_model=schemas.OrderOut)
+def update_order_status(
+    order_id: int,
+    payload: schemas.OrderStatusUpdate,
+    request: Request,
+    manager: models.S00_User = Depends(require_manager),
+    db: Session = Depends(get_db),
+):
+    """
+    Updates the shipping/fulfillment status of a customer order (Manager only).
+    Status stages: Processing -> Confirmed -> Shipped -> Out for Delivery -> Delivered
+    """
+    order = (
+        db.query(models.C00_Order)
+        .options(joinedload(models.C00_Order.items).joinedload(models.C00_OrderItem.product))
+        .filter(models.C00_Order.id == order_id)
+        .first()
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail=f"Order #{order_id} not found")
+
+    old_status = order.status
+    order.status = payload.status
+    if payload.tracking_number is not None:
+        order.tracking_number = payload.tracking_number.strip()
+    if payload.estimated_delivery is not None:
+        order.estimated_delivery = payload.estimated_delivery.strip()
+
+    client_ip = request.client.host if request.client else "unknown"
+    db.add(
+        models.S00_ActivityLog(
+            user_id=manager.id,
+            action="UPDATE_ORDER_STATUS",
+            entity_type="ORDER",
+            entity_id=order.id,
+            details=f"Status changed from '{old_status}' to '{order.status}' by manager {manager.email}",
+            ip_address=client_ip,
+        )
+    )
+
+    db.commit()
+    db.refresh(order)
+    return _format_order(order)

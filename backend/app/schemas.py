@@ -10,13 +10,24 @@ class UserCreate(BaseModel):
 class UserOut(BaseModel):
     id: int
     email: str
+    role: str = "customer"
+    full_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    role: str = "customer"
 
 
 # ===================== S00_ SYSTEM LOG SCHEMAS =====================
@@ -141,6 +152,24 @@ class SiteSettingOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class NavigationMenuItemOut(BaseModel):
+    id: int
+    parent_id: int | None = None
+    title_en: str
+    title_zh: str
+    url: str
+    icon: str | None = None
+    badge_en: str | None = None
+    badge_zh: str | None = None
+    sort_order: int = 0
+    is_active: bool = True
+    requires_auth: bool = False
+    requires_role: str | None = None
+    children: list["NavigationMenuItemOut"] = []
+
+    model_config = {"from_attributes": True}
+
+
 class OrderItemCreate(BaseModel):
     product_id: int
     quantity: int
@@ -148,6 +177,12 @@ class OrderItemCreate(BaseModel):
 
 class OrderCreate(BaseModel):
     items: list[OrderItemCreate]
+    delivery_method: str = "standard"  # standard, express, pickup
+    payment_method: str = "credit_card"  # credit_card, apple_pay, cod, bank_transfer
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    shipping_address: str | None = None
+    delivery_notes: str | None = None
 
 
 class OrderItemOut(BaseModel):
@@ -155,6 +190,9 @@ class OrderItemOut(BaseModel):
     product_id: int
     quantity: int
     unit_price: float
+    product_title_en: str | None = None
+    product_title_zh: str | None = None
+    product_image_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -163,11 +201,26 @@ class OrderOut(BaseModel):
     id: int
     user_id: int
     total_amount: float
+    shipping_fee: float = 0.0
     status: str
+    delivery_method: str = "standard"
+    payment_method: str = "credit_card"
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    shipping_address: str | None = None
+    delivery_notes: str | None = None
+    tracking_number: str | None = None
+    estimated_delivery: str | None = None
     created_at: datetime
     items: list[OrderItemOut] = []
 
     model_config = {"from_attributes": True}
+
+
+class OrderStatusUpdate(BaseModel):
+    status: str
+    tracking_number: str | None = None
+    estimated_delivery: str | None = None
 
 
 # ===================== CHATBOT & KNOWLEDGE SCHEMAS =====================
@@ -192,3 +245,34 @@ class KnowledgeBaseOut(BaseModel):
     keywords: str
 
     model_config = {"from_attributes": True}
+
+
+# ===================== EXCEL IMPORT SCHEMAS =====================
+
+class ExcelImportRowError(BaseModel):
+    row: int
+    title: str | None = None
+    isbn: str | None = None
+    reason: str
+
+
+class ExcelImportBookSummary(BaseModel):
+    id: int
+    title_en: str
+    title_zh: str
+    author_en: str
+    price: float
+    isbn: str | None = None
+    action: str  # INSERTED or UPDATED
+
+
+class ExcelImportResult(BaseModel):
+    success: bool
+    filename: str
+    total_rows: int
+    inserted: int
+    updated: int
+    failed: int
+    errors: list[ExcelImportRowError] = []
+    imported_books: list[ExcelImportBookSummary] = []
+

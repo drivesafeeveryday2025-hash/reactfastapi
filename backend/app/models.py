@@ -19,6 +19,10 @@ class S00_User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(50), default="customer")
+    full_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -200,7 +204,16 @@ class C00_Order(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("S00_users.id"))
     total_amount: Mapped[float] = mapped_column(Float, default=0.0)
-    status: Mapped[str] = mapped_column(String(50), default="confirmed")
+    shipping_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(50), default="Processing")  # Processing, Confirmed, Shipped, Out for Delivery, Delivered
+    delivery_method: Mapped[str] = mapped_column(String(50), default="standard")  # standard, express, pickup
+    payment_method: Mapped[str] = mapped_column(String(50), default="credit_card")  # credit_card, apple_pay, cod, bank_transfer
+    recipient_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    recipient_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    shipping_address: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    estimated_delivery: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -220,3 +233,29 @@ class C00_OrderItem(Base):
 
     order: Mapped["C00_Order"] = relationship(back_populates="items")
     product: Mapped["C00_Product"] = relationship()
+
+
+class C00_NavigationMenu(Base):
+    __tablename__ = "C00_navigation_menus"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("C00_navigation_menus.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    title_en: Mapped[str] = mapped_column(String(100))
+    title_zh: Mapped[str] = mapped_column(String(100))
+    url: Mapped[str] = mapped_column(String(250))
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    badge_en: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    badge_zh: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    requires_auth: Mapped[bool] = mapped_column(Boolean, default=False)
+    requires_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    parent: Mapped["C00_NavigationMenu | None"] = relationship(
+        "C00_NavigationMenu", back_populates="children", remote_side=[id]
+    )
+    children: Mapped[list["C00_NavigationMenu"]] = relationship(
+        "C00_NavigationMenu", back_populates="parent", cascade="all, delete-orphan", order_by="C00_NavigationMenu.sort_order"
+    )

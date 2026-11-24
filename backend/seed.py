@@ -27,12 +27,19 @@ db.add_all([role_cust, role_admin, role_staff])
 user_admin = S00_User(
     email="admin@apex.local",
     hashed_password=hash_password("admin123"),
+    role="manager",
 )
 user_customer = S00_User(
     email="customer@apex.local",
     hashed_password=hash_password("user123"),
+    role="customer",
 )
-db.add_all([user_admin, user_customer])
+user_react = S00_User(
+    email="react@mail",
+    hashed_password=hash_password("react123"),
+    role="manager",
+)
+db.add_all([user_admin, user_customer, user_react])
 db.flush()
 
 # 2. Site Settings (Bilingual: English & Traditional Chinese)

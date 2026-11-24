@@ -50,18 +50,21 @@ Whenever you open VS Code to work on this project, press **``Ctrl + ` ``** (Ctrl
 
 | Service | Address | What it does |
 | :--- | :--- | :--- |
-| **React Bookstore UI** | `http://localhost:5173` | Your live customer-facing website with Theme & Language switchers |
-| **FastAPI Swagger Docs** | `http://localhost:8000/docs` | Test all backend endpoints, place orders, view raw JSON |
+| **Customer Storefront** | `http://localhost:5173/` | Customer-facing bookstore: browsing, cart, checkout, AI support |
+| **Manager Admin Portal** | `http://localhost:5173/admin` | Management portal: KPI metrics, book inventory, bulk import, audit logs |
+| **Manager Login Page** | `http://localhost:5173/admin/login` | Dedicated sign-in page for store managers and administrative staff |
+| **FastAPI Swagger Docs** | `http://localhost:8000/docs` | Test backend endpoints, inspect schemas and API definitions |
 | **PostgreSQL Database** | Port `5432` / DB: `appdb` | Inspect tables via **pgAdmin 4** (`S00_` and `C00_` tables) |
 
 ---
 
 ## 🔑 Demo Sign-in Accounts (Seeded in Database)
 
-| Account Role | Email | Password |
-| :--- | :--- | :--- |
-| **Admin** | `admin@apex.local` | `admin123` |
-| **Customer** | `customer@apex.local` | `user123` |
+| Account Role | Email | Password | Role & Permissions |
+| :--- | :--- | :--- | :--- |
+| **Manager (Bulk Importer)** | `react@mail` | `react123` | `manager` ➔ Full access to `/admin`, Excel/Word bulk import, system logs, inventory |
+| **Store Manager** | `admin@apex.local` | `admin123` | `manager` ➔ Full access to `/admin`, KPI dashboard, system audit logs |
+| **Customer** | `customer@apex.local` | `user123` | `customer` ➔ Standard customer: browsing, cart, orders, AI chatbot (blocked from `/admin`) |
 
 ---
 
@@ -79,6 +82,41 @@ The bookstore chatbot is protected by JWT authentication and rate limiting (max 
    - **Real Bestseller Ranking:** `"熱門暢銷排行榜"` ➔ Computes real order statistics from PostgreSQL orders table (`C00_order_items`).
    - **Security Refusal:** `"What is my account password?"` ➔ Refuses to disclose password, explains Argon2 cryptographic hashing.
    - **Bot Protection & Quota Limiter:** Send 6 messages in quick succession ➔ Automatically triggers HTTP 429 rate limit warning.
+
+---
+
+## 📊 Excel & Word Product Bulk Import Guide (Restricted to `react@mail`)
+
+Only users signed in as **`react@mail`** can view the Bulk Import interface or call the import endpoints. Direct URL access or calls by other accounts are rejected with `HTTP 403 Forbidden`.
+
+### Example Templates Location:
+The official Word and Excel example template files are stored directly in the `plan/` folder:
+- **Word Document:** [`D:\tempA\reactfull\plan\apex_books_template.docx`](file:///D:/tempA/reactfull/plan/apex_books_template.docx) (also at `D:\plan\apex_books_template.docx`)
+- **Excel Spreadsheet:** [`D:\tempA\reactfull\plan\apex_books_template.xlsx`](file:///D:/tempA/reactfull/plan/apex_books_template.xlsx) (also at `D:\plan\apex_books_template.xlsx`)
+
+### Option 1: Via the Web Interface (UI)
+1. Open **`http://localhost:5173`**.
+2. Click **Sign In** and log in as **`react@mail`** (password: `react123`).
+3. The **`📥 Excel / Word 匯入 (Import Excel / Word)`** button will appear in the top navigation bar and above the Book Catalog.
+4. Click the button to open the modal:
+   - Click **Excel (.xlsx)** or **Word (.docx)** to download your preferred template.
+   - Select your filled `.xlsx` or `.docx` file and click **Start Bulk Import**.
+   - View live import statistics (inserted, updated, errors) and watch the catalog auto-refresh immediately!
+
+### Option 2: Via the Terminal (CLI)
+You can also run imports directly from PowerShell:
+```powershell
+cd D:\tempA\reactfull\backend
+.\.venv\Scripts\Activate.ps1
+
+# 1. Word Document (.docx) Import & Template Generation:
+python import_word.py --template my_books_template.docx
+python import_word.py ..\plan\apex_books_template.docx
+
+# 2. Excel Spreadsheet (.xlsx) Import & Template Generation:
+python import_excel.py --template my_books_template.xlsx
+python import_excel.py ..\plan\apex_books_template.xlsx
+```
 
 ---
 
