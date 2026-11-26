@@ -4,6 +4,7 @@ import { useTheme } from "./contexts/ThemeContext";
 import { useLanguage } from "./contexts/LanguageContext";
 import AdminPortal from "./components/AdminPortal";
 import AdminLogin from "./components/AdminLogin";
+import ResetPassword from "./components/ResetPassword";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -174,11 +175,13 @@ export default function App() {
     user?.email === "react@mail.com";
 
   // Authentication states
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "forgot_password">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [devResetLink, setDevResetLink] = useState<string | null>(null);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   // Data from PostgreSQL
   const [settings, setSettings] = useState<SiteSettings | null>(null);
@@ -495,6 +498,43 @@ export default function App() {
           ? "無法連線至後端伺服器，請確認 FastAPI 正在執行中。"
           : "Cannot connect to backend server. Please verify FastAPI is running."
       );
+    }
+  }
+
+  async function handleForgotPassword(e: FormEvent) {
+    e.preventDefault();
+    setAuthError("");
+    setAuthMessage("");
+    setDevResetLink(null);
+    setForgotLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.detail || "Failed to process password reset request");
+      } else {
+        setAuthMessage(
+          lang === "zh-TW"
+            ? "重設密碼連結已發送至您的電子信箱！請查收郵件。"
+            : "Password reset instructions sent! Please check your email inbox."
+        );
+        if (data.dev_reset_link) {
+          setDevResetLink(data.dev_reset_link);
+        }
+      }
+    } catch {
+      setAuthError(
+        lang === "zh-TW"
+          ? "無法連線至後端伺服器，請稍後再試。"
+          : "Cannot connect to backend server. Please try again later."
+      );
+    } finally {
+      setForgotLoading(false);
     }
   }
 
@@ -881,77 +921,152 @@ export default function App() {
               {localize(settings, "store_name") || "Apex Book Haven"}
             </h2>
             <p style={{ color: "var(--text-secondary)", margin: 0, fontSize: 14 }}>
-              {authMode === "login" ? t("auth_sub_login") : t("auth_sub_register")}
+              {authMode === "forgot_password"
+                ? (lang === "zh-TW" ? "輸入您的電子郵件以重設密碼" : "Enter your email to receive a password reset link")
+                : (authMode === "login" ? t("auth_sub_login") : t("auth_sub_register"))}
             </p>
           </div>
 
-          <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
-                {t("auth_email_label")}
-              </label>
-              <input
-                type="email"
-                placeholder="reader@example.com"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                required
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-              />
-            </div>
+          {authMode === "forgot_password" ? (
+            <form onSubmit={handleForgotPassword} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                  {t("auth_email_label")}
+                </label>
+                <input
+                  type="email"
+                  placeholder="reader@example.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
 
-            <div>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
-                {t("auth_pass_label")}
-              </label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                required
-                minLength={6}
+              <button
+                type="submit"
+                disabled={forgotLoading}
                 style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "10px 14px",
+                  padding: 12,
+                  background: "var(--accent)",
+                  color: "white",
+                  border: "none",
                   borderRadius: 8,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  fontSize: 14,
-                  outline: "none",
+                  fontWeight: 700,
+                  fontSize: 15,
+                  cursor: forgotLoading ? "not-allowed" : "pointer",
+                  opacity: forgotLoading ? 0.7 : 1,
+                  marginTop: 6,
                 }}
-              />
-            </div>
+              >
+                {forgotLoading
+                  ? (lang === "zh-TW" ? "發送中..." : "Sending...")
+                  : (lang === "zh-TW" ? "發送重設密碼信件" : "Send Password Reset Link")}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
+                  {t("auth_email_label")}
+                </label>
+                <input
+                  type="email"
+                  placeholder="reader@example.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
 
-            <button
-              type="submit"
-              style={{
-                padding: 12,
-                background: "var(--accent)",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: 15,
-                cursor: "pointer",
-                marginTop: 6,
-              }}
-            >
-              {authMode === "login" ? t("auth_btn_login") : t("auth_btn_register")}
-            </button>
-          </form>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
+                    {t("auth_pass_label")}
+                  </label>
+                  {authMode === "login" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode("forgot_password");
+                        setAuthError("");
+                        setAuthMessage("");
+                        setDevResetLink(null);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--accent)",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        padding: 0,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {lang === "zh-TW" ? "忘記密碼？" : "Forgot password?"}
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  padding: 12,
+                  background: "var(--accent)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: 15,
+                  cursor: "pointer",
+                  marginTop: 6,
+                }}
+              >
+                {authMode === "login" ? t("auth_btn_login") : t("auth_btn_register")}
+              </button>
+            </form>
+          )}
 
           {authError && (
             <div style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 14px", borderRadius: 8, marginTop: 14, fontSize: 13, border: "1px solid #fecaca" }}>
@@ -964,18 +1079,62 @@ export default function App() {
             </div>
           )}
 
-          <div style={{ marginTop: 22, textAlign: "center", fontSize: 14, color: "var(--text-secondary)" }}>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode(authMode === "login" ? "register" : "login");
-                setAuthError("");
-                setAuthMessage("");
+          {devResetLink && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "12px 14px",
+                background: "#eff6ff",
+                borderRadius: 8,
+                border: "1px solid #bfdbfe",
+                fontSize: 13,
               }}
-              style={{ background: "none", border: "none", color: "var(--accent)", fontWeight: 700, cursor: "pointer", padding: 0 }}
             >
-              {authMode === "login" ? t("auth_toggle_to_reg") : t("auth_toggle_to_log")}
-            </button>
+              <div style={{ fontWeight: 600, color: "#1e40af", marginBottom: 4 }}>
+                🛠️ Dev Simulation Mode (No SMTP needed):
+              </div>
+              <a
+                href={devResetLink}
+                style={{
+                  color: "#2563eb",
+                  fontWeight: 600,
+                  textDecoration: "underline",
+                  wordBreak: "break-all",
+                }}
+              >
+                🔗 Click here to open reset link directly
+              </a>
+            </div>
+          )}
+
+          <div style={{ marginTop: 22, textAlign: "center", fontSize: 14, color: "var(--text-secondary)" }}>
+            {authMode === "forgot_password" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                  setAuthMessage("");
+                  setDevResetLink(null);
+                }}
+                style={{ background: "none", border: "none", color: "var(--accent)", fontWeight: 700, cursor: "pointer", padding: 0 }}
+              >
+                ← {lang === "zh-TW" ? "返回登入" : "Back to Sign In"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode(authMode === "login" ? "register" : "login");
+                  setAuthError("");
+                  setAuthMessage("");
+                  setDevResetLink(null);
+                }}
+                style={{ background: "none", border: "none", color: "var(--accent)", fontWeight: 700, cursor: "pointer", padding: 0 }}
+              >
+                {authMode === "login" ? t("auth_toggle_to_reg") : t("auth_toggle_to_log")}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -2302,7 +2461,23 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => window.open(`${API_URL}/api/orders/${checkoutSuccessOrder.id}/invoice-html?autoprint=true`, '_blank')}
+                style={{
+                  padding: "12px 18px",
+                  borderRadius: 10,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                📄 {lang === "zh-TW" ? "下載發票" : "Tax Invoice"}
+              </button>
               <button
                 onClick={() => {
                   setCheckoutSuccessOrder(null);
@@ -2513,13 +2688,34 @@ export default function App() {
                                 </div>
                               </div>
 
-                              <div style={{ textAlign: "right" }}>
+                              <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                                 <div style={{ fontSize: 18, fontWeight: 900, color: "var(--accent)" }}>
                                   ${ord.total_amount.toFixed(2)}
                                 </div>
                                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                                   {ord.items.length} {lang === "zh-TW" ? "本書籍" : "items"}
                                 </div>
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(`${API_URL}/api/orders/${ord.id}/invoice-html?autoprint=true`, '_blank')}
+                                  title={lang === "zh-TW" ? "下載/列印電子發票" : "Print/Download Official Tax Invoice"}
+                                  style={{
+                                    marginTop: 4,
+                                    padding: "4px 10px",
+                                    borderRadius: 6,
+                                    border: "1px solid var(--border-color)",
+                                    background: "var(--bg-secondary)",
+                                    color: "var(--text-primary)",
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  📄 {lang === "zh-TW" ? "下載發票" : "Tax Invoice"}
+                                </button>
                               </div>
                             </div>
 
@@ -3346,7 +3542,13 @@ export default function App() {
         }
       />
 
-      {/* 3. Customer Storefront Route */}
+      {/* 3. Password Reset Route (Customer & Manager) */}
+      <Route
+        path="/reset-password"
+        element={<ResetPassword lang={lang} />}
+      />
+
+      {/* 4. Customer Storefront Route */}
       <Route
         path="*"
         element={!user ? CustomerSignInView : CustomerStorefrontView}

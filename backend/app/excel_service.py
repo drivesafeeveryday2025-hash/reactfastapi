@@ -1,5 +1,6 @@
 import io
 import re
+from datetime import datetime
 from typing import Any
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -715,3 +716,210 @@ def import_books_from_excel(db: Session, file_contents: bytes, filename: str) ->
         "errors": errors,
         "imported_books": imported_books,
     }
+
+
+# ===================== WMS PHYSICAL STOCKTAKE CHECKLIST EXPORT =====================
+
+def generate_stocktake_checklist_excel(
+    inventory_items: list[dict],
+    warehouse_name: str = "All Facilities",
+    zone_name: str = "All Zones",
+) -> bytes:
+    """
+    Generates a print-ready, professional Excel (.xlsx) Stocktake Checklist.
+    Includes inventory identifiers, location codes, expected book quantities,
+    and dedicated blank fields for physical count, discrepancy, and manager approval sign-offs.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Stocktake Checklist"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Styling definitions
+    font_company = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
+    font_subtitle = Font(name="Calibri", size=10, italic=True, color="475569")
+    font_meta_label = Font(name="Calibri", size=9, bold=True, color="334155")
+    font_meta_val = Font(name="Calibri", size=9, color="0F172A")
+    font_tbl_header = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    font_data = Font(name="Calibri", size=9, color="0F172A")
+    font_data_bold = Font(name="Calibri", size=9, bold=True, color="0F172A")
+    font_sign_label = Font(name="Calibri", size=9, bold=True, color="475569")
+
+    fill_tbl_header = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    fill_accent_header = PatternFill(start_color="0284C7", end_color="0284C7", fill_type="solid")
+    fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    fill_write_col = PatternFill(start_color="FEF9C3", end_color="FEF9C3", fill_type="solid")  # light yellow tint
+
+    thin_border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    box_write_border = Border(
+        left=Side(style="medium", color="64748B"),
+        right=Side(style="medium", color="64748B"),
+        top=Side(style="thin", color="94A3B8"),
+        bottom=Side(style="thin", color="94A3B8"),
+    )
+    double_bottom_border = Border(
+        top=Side(style="thin", color="94A3B8"),
+        bottom=Side(style="double", color="0F172A"),
+    )
+
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+    align_right = Alignment(horizontal="right", vertical="center")
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    batch_ref = f"STK-{datetime.now().strftime('%Y%m%d')}-{len(inventory_items):03d}"
+
+    # Row 1-2: Banner
+    ws.merge_cells("A1:M1")
+    ws["A1"] = "APEX BOOK HAVEN — PHYSICAL STOCKTAKE AUDIT CHECKLIST"
+    ws["A1"].font = font_company
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+
+    ws.merge_cells("A2:M2")
+    ws["A2"] = "Official Warehouse Physical Count & Variance Verification Form (門市與倉儲實體盤點核對表)"
+    ws["A2"].font = font_subtitle
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center")
+
+    # Row 3: Meta box
+    ws["A3"] = "Audit Ref:"
+    ws["A3"].font = font_meta_label
+    ws["B3"] = batch_ref
+    ws["B3"].font = font_meta_val
+
+    ws["D3"] = "Warehouse:"
+    ws["D3"].font = font_meta_label
+    ws["E3"] = warehouse_name
+    ws["E3"].font = font_meta_val
+
+    ws["G3"] = "Target Zone / Area:"
+    ws["G3"].font = font_meta_label
+    ws["H3"] = zone_name
+    ws["H3"].font = font_meta_val
+
+    ws["K3"] = "Audit Date:"
+    ws["K3"].font = font_meta_label
+    ws["L3"] = now_str
+    ws["L3"].font = font_meta_val
+
+    # Table headers at Row 5
+    headers = [
+        ("#", 5, align_center),
+        ("ISBN / SKU", 17, align_center),
+        ("Book Title (English)", 30, align_left),
+        ("Book Title (繁體中文)", 22, align_left),
+        ("Category", 18, align_left),
+        ("Warehouse", 14, align_center),
+        ("Zone / Area", 20, align_left),
+        ("Location (Aisle-Shelf-Bin)", 24, align_center),
+        ("Condition", 15, align_center),
+        ("System Expected Qty", 19, align_right),
+        ("Physical Counted Qty", 20, align_center),
+        ("Variance (+ / -)", 16, align_center),
+        ("Auditor Inspection Notes", 28, align_left),
+    ]
+
+    header_row = 5
+    for col_idx, (h_title, width, h_align) in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=h_title)
+        if col_idx in (11, 12):
+            cell.fill = fill_accent_header
+        else:
+            cell.fill = fill_tbl_header
+        cell.font = font_tbl_header
+        cell.alignment = align_center
+        cell.border = thin_border
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = max(width, 10)
+
+    ws.row_dimensions[header_row].height = 26
+
+    # Data Rows
+    current_row = 6
+    total_sys_units = 0
+
+    for idx, item in enumerate(inventory_items, start=1):
+        sys_qty = item.get("quantity", 0)
+        total_sys_units += sys_qty
+
+        cond_display = {
+            "brand_new": "Brand New (全新)",
+            "minor_wear": "Minor Wear (微損/展示)",
+            "damaged": "Damaged (瑕疵/隔離)",
+        }.get(item.get("condition", ""), item.get("condition", ""))
+
+        loc_code = item.get("location_code", "")
+        aisle = item.get("aisle", "")
+        shelf = item.get("shelf", "")
+        bin_val = item.get("bin", "")
+        formatted_loc = f"{aisle} / {shelf} / {bin_val} ({loc_code})" if aisle else loc_code
+
+        row_fill = fill_even if idx % 2 == 0 else PatternFill(fill_type=None)
+
+        values = [
+            (idx, align_center, font_data),
+            (item.get("isbn") or f"SKU-{item.get('product_id', 0):05d}", align_center, font_data),
+            (item.get("product_title_en", ""), align_left, font_data_bold),
+            (item.get("product_title_zh", ""), align_left, font_data),
+            (item.get("category_name_en", ""), align_left, font_data),
+            (item.get("warehouse_code", ""), align_center, font_data),
+            (item.get("zone_name_en") or item.get("zone", ""), align_left, font_data),
+            (formatted_loc, align_center, font_data),
+            (cond_display, align_center, font_data),
+            (sys_qty, align_right, font_data_bold),
+            ("", align_center, font_data_bold),
+            ("", align_center, font_data),
+            ("", align_left, font_data),
+        ]
+
+        for col_idx, (val, cell_align, cell_font) in enumerate(values, start=1):
+            cell = ws.cell(row=current_row, column=col_idx, value=val)
+            cell.font = cell_font
+            cell.alignment = cell_align
+            cell.border = thin_border
+            if col_idx == 11:
+                cell.fill = fill_write_col
+                cell.border = box_write_border
+            elif row_fill.fill_type:
+                cell.fill = row_fill
+
+        ws.row_dimensions[current_row].height = 20
+        current_row += 1
+
+    # Total Summary Row
+    summary_row = current_row
+    ws.merge_cells(start_row=summary_row, start_column=1, end_row=summary_row, end_column=9)
+    ws.cell(row=summary_row, column=1, value=f"Total Audited Line Items: {len(inventory_items)} SKUs").font = font_data_bold
+    ws.cell(row=summary_row, column=1).alignment = align_left
+
+    sum_cell = ws.cell(row=summary_row, column=10, value=total_sys_units)
+    sum_cell.font = font_data_bold
+    sum_cell.alignment = align_right
+
+    for c in range(1, 14):
+        ws.cell(row=summary_row, column=c).border = double_bottom_border
+
+    ws.row_dimensions[summary_row].height = 22
+    current_row += 3
+
+    # Sign-off Blocks for Physical Auditor and Manager
+    ws.cell(row=current_row, column=2, value="Stocktake Auditor Signature:").font = font_sign_label
+    ws.cell(row=current_row, column=4, value="___________________________").font = font_sign_label
+    ws.cell(row=current_row, column=7, value="Warehouse Supervisor Sign-off:").font = font_sign_label
+    ws.cell(row=current_row, column=9, value="___________________________").font = font_sign_label
+
+    current_row += 1
+    ws.cell(row=current_row, column=2, value="Audit Date & Time:").font = font_sign_label
+    ws.cell(row=current_row, column=4, value="____ / ____ / ________   ___:___").font = font_sign_label
+    ws.cell(row=current_row, column=7, value="Approval Date & Time:").font = font_sign_label
+    ws.cell(row=current_row, column=9, value="____ / ____ / ________   ___:___").font = font_sign_label
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
+

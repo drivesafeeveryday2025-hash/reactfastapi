@@ -27,9 +27,9 @@ class S00_User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    orders: Mapped[list["C00_Order"]] = relationship(back_populates="user")
-    login_logs: Mapped[list["S00_LoginLog"]] = relationship(back_populates="user")
-    activities: Mapped[list["S00_ActivityLog"]] = relationship(back_populates="user")
+    orders: Mapped[list["C00_Order"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    login_logs: Mapped[list["S00_LoginLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    activities: Mapped[list["S00_ActivityLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class S00_LoginLog(Base):
@@ -95,6 +95,37 @@ class S00_ChatRateLimit(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class S00_LoginAttempt(Base):
+    __tablename__ = "S00_login_attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    ip_address: Mapped[str] = mapped_column(String(50), index=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    attempt_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    is_successful: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class S00_PasswordReset(Base):
+    __tablename__ = "S00_password_resets"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("S00_users.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    token: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["S00_User"] = relationship()
+
 
 
 # ===================== C00_ BOOKSTORE CONFIG & CATALOG =====================
@@ -170,6 +201,9 @@ class C00_Product(Base):
     short_desc_en: Mapped[str] = mapped_column(String(300))
     short_desc_zh: Mapped[str] = mapped_column(String(300))
     price: Mapped[float] = mapped_column(Float)
+    cost_price: Mapped[float] = mapped_column(Float, default=0.0)
+    safety_stock: Mapped[int] = mapped_column(Integer, default=15)
+    reorder_quantity: Mapped[int] = mapped_column(Integer, default=50)
     image_url: Mapped[str] = mapped_column(String(500))
     is_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -259,3 +293,141 @@ class C00_NavigationMenu(Base):
     children: Mapped[list["C00_NavigationMenu"]] = relationship(
         "C00_NavigationMenu", back_populates="parent", cascade="all, delete-orphan", order_by="C00_NavigationMenu.sort_order"
     )
+
+
+# ===================== W00_ WAREHOUSE & INVENTORY MANAGEMENT =====================
+
+class W00_Warehouse(Base):
+    __tablename__ = "W00_warehouses"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name_en: Mapped[str] = mapped_column(String(100))
+    name_zh: Mapped[str] = mapped_column(String(100))
+    address_en: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address_zh: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    locations: Mapped[list["W00_Location"]] = relationship(back_populates="warehouse", cascade="all, delete-orphan")
+
+
+class W00_Location(Base):
+    __tablename__ = "W00_locations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("W00_warehouses.id", ondelete="CASCADE"), index=True)
+    zone: Mapped[str] = mapped_column(String(50), index=True)
+    zone_name_en: Mapped[str] = mapped_column(String(100))
+    zone_name_zh: Mapped[str] = mapped_column(String(100))
+    aisle: Mapped[str] = mapped_column(String(20))
+    shelf: Mapped[str] = mapped_column(String(20))
+    bin: Mapped[str] = mapped_column(String(20))
+    location_code: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    category_hint: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    warehouse: Mapped["W00_Warehouse"] = relationship(back_populates="locations")
+    inventories: Mapped[list["W00_Inventory"]] = relationship(back_populates="location", cascade="all, delete-orphan")
+
+
+class W00_Inventory(Base):
+    __tablename__ = "W00_inventory"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("C00_products.id", ondelete="CASCADE"), index=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("W00_locations.id", ondelete="CASCADE"), index=True)
+    condition: Mapped[str] = mapped_column(String(50), default="brand_new", index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    last_counted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    product: Mapped["C00_Product"] = relationship()
+    location: Mapped["W00_Location"] = relationship(back_populates="inventories")
+
+
+class W00_Adjustment(Base):
+    __tablename__ = "W00_adjustments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    voucher_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("C00_products.id", ondelete="CASCADE"), index=True)
+    from_location_id: Mapped[int | None] = mapped_column(ForeignKey("W00_locations.id", ondelete="SET NULL"), nullable=True)
+    to_location_id: Mapped[int | None] = mapped_column(ForeignKey("W00_locations.id", ondelete="SET NULL"), nullable=True)
+    from_condition: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    to_condition: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    change_qty: Mapped[int] = mapped_column(Integer, default=0)
+    reason_code: Mapped[str] = mapped_column(String(50))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("S00_users.id", ondelete="SET NULL"), nullable=True)
+    created_by_name: Mapped[str] = mapped_column(String(100), default="Warehouse Manager")
+    status: Mapped[str] = mapped_column(String(30), default="APPROVED")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    product: Mapped["C00_Product"] = relationship()
+    from_location: Mapped["W00_Location | None"] = relationship("W00_Location", foreign_keys=[from_location_id])
+    to_location: Mapped["W00_Location | None"] = relationship("W00_Location", foreign_keys=[to_location_id])
+    user: Mapped["S00_User | None"] = relationship("S00_User", foreign_keys=[created_by_user_id])
+
+
+class W00_Supplier(Base):
+    __tablename__ = "W00_suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(150), unique=True, index=True)
+    contact_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    lead_time_days: Mapped[int] = mapped_column(Integer, default=5)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    purchase_orders: Mapped[list["W00_PurchaseOrder"]] = relationship(back_populates="supplier")
+
+
+class W00_PurchaseOrder(Base):
+    __tablename__ = "W00_purchase_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    po_number: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("W00_suppliers.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="ORDERED", index=True)  # DRAFT, ORDERED, RECEIVED, CANCELLED
+    total_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("S00_users.id", ondelete="SET NULL"), nullable=True)
+    created_by_name: Mapped[str] = mapped_column(String(100), default="Warehouse Manager")
+    ordered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    supplier: Mapped["W00_Supplier"] = relationship(back_populates="purchase_orders")
+    items: Mapped[list["W00_PurchaseOrderItem"]] = relationship(back_populates="purchase_order", cascade="all, delete-orphan")
+
+
+class W00_PurchaseOrderItem(Base):
+    __tablename__ = "W00_purchase_order_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    po_id: Mapped[int] = mapped_column(ForeignKey("W00_purchase_orders.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("C00_products.id"), index=True)
+    quantity_ordered: Mapped[int] = mapped_column(Integer)
+    quantity_received: Mapped[int] = mapped_column(Integer, default=0)
+    unit_cost: Mapped[float] = mapped_column(Float)
+
+    purchase_order: Mapped["W00_PurchaseOrder"] = relationship(back_populates="items")
+    product: Mapped["C00_Product"] = relationship()
+
+

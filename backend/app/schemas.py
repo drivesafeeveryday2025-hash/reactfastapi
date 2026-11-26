@@ -30,6 +30,35 @@ class Token(BaseModel):
     role: str = "customer"
 
 
+# ===================== S00_ PASSWORD RESET & SECURITY SCHEMAS =====================
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    success: bool
+    message: str
+    dev_reset_link: str | None = None
+
+
+class VerifyResetTokenResponse(BaseModel):
+    valid: bool
+    email: str | None = None
+    message: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class ResetPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+
+
 # ===================== S00_ SYSTEM LOG SCHEMAS =====================
 
 class LoginLogOut(BaseModel):
@@ -275,4 +304,237 @@ class ExcelImportResult(BaseModel):
     failed: int
     errors: list[ExcelImportRowError] = []
     imported_books: list[ExcelImportBookSummary] = []
+
+
+# ===================== W00_ WAREHOUSE & INVENTORY SCHEMAS =====================
+
+class WarehouseOut(BaseModel):
+    id: int
+    code: str
+    name_en: str
+    name_zh: str
+    address_en: str | None = None
+    address_zh: str | None = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class WarehouseLocationOut(BaseModel):
+    id: int
+    warehouse_id: int
+    warehouse_code: str | None = None
+    warehouse_name_en: str | None = None
+    warehouse_name_zh: str | None = None
+    zone: str
+    zone_name_en: str
+    zone_name_zh: str
+    aisle: str
+    shelf: str
+    bin: str
+    location_code: str
+    category_hint: str | None = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class InventoryItemOut(BaseModel):
+    id: int
+    product_id: int
+    location_id: int
+    condition: str  # brand_new, minor_wear, damaged
+    quantity: int
+    reserved_quantity: int
+    available_quantity: int
+    last_counted_at: datetime | None = None
+    updated_at: datetime
+
+    # Product details
+    product_title_en: str
+    product_title_zh: str
+    product_author_en: str
+    isbn: str | None = None
+    price: float
+    category_id: int
+    category_name_en: str
+    category_name_zh: str
+    image_url: str | None = None
+
+    # Location details
+    location_code: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name_en: str
+    warehouse_name_zh: str
+    zone: str
+    zone_name_en: str
+    zone_name_zh: str
+    aisle: str
+    shelf: str
+    bin: str
+
+
+class WarehouseOverviewOut(BaseModel):
+    total_units_on_hand: int
+    total_units_reserved: int
+    total_distinct_skus: int
+    condition_counts: dict[str, int]
+    total_locations: int
+    total_warehouses: int
+    recent_adjustments_count: int
+
+
+class AdjustmentCreate(BaseModel):
+    product_id: int
+    change_qty: int = 0
+    reason_code: str  # COUNT_DISCREPANCY, DAMAGE_FOUND, RELOCATION, RESTOCK_RECEIVING, CONDITION_RECLASSIFY, EXPIRED_SCRAP
+    notes: str | None = None
+    from_location_id: int | None = None
+    to_location_id: int | None = None
+    from_condition: str | None = None
+    to_condition: str | None = None
+    created_by_name: str | None = "Warehouse Manager"
+
+
+class AdjustmentOut(BaseModel):
+    id: int
+    voucher_no: str
+    product_id: int
+    product_title_en: str
+    product_title_zh: str
+    isbn: str | None = None
+    from_location_id: int | None = None
+    from_location_code: str | None = None
+    to_location_id: int | None = None
+    to_location_code: str | None = None
+    from_condition: str | None = None
+    to_condition: str | None = None
+    change_qty: int
+    reason_code: str
+    notes: str | None = None
+    created_by_name: str
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StocktakeFilterRequest(BaseModel):
+    warehouse_id: int | None = None
+    zone: str | None = None
+    product_ids: list[int] | None = None
+    condition: str | None = None
+
+
+# ===================== FULFILLMENT & PROCUREMENT SCHEMAS =====================
+
+class FulfillmentAdvanceRequest(BaseModel):
+    status: str  # Processing -> Confirmed -> Picking -> Packed -> Shipped -> Delivered
+    tracking_number: str | None = None
+    notes: str | None = None
+
+
+class PickListItem(BaseModel):
+    product_id: int
+    title_en: str
+    title_zh: str
+    isbn: str | None = None
+    location_code: str
+    zone: str
+    aisle: str
+    shelf: str
+    bin: str
+    quantity_to_pick: int
+    order_ids: list[int]
+
+
+class PickListResponse(BaseModel):
+    generated_at: str
+    total_orders_count: int
+    total_items_to_pick: int
+    pick_items: list[PickListItem]
+
+
+class LowStockAlertOut(BaseModel):
+    product_id: int
+    title_en: str
+    title_zh: str
+    isbn: str | None = None
+    category_name: str | None = None
+    total_on_hand: int
+    total_reserved: int
+    total_available: int
+    safety_stock: int
+    reorder_quantity: int
+    cost_price: float
+    retail_price: float
+    urgency: str  # CRITICAL (available <= 0), LOW (available <= safety_stock), NORMAL
+
+
+class SupplierCreate(BaseModel):
+    name: str
+    contact_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    lead_time_days: int = 5
+
+
+class SupplierOut(BaseModel):
+    id: int
+    name: str
+    contact_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    lead_time_days: int
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PurchaseOrderItemCreate(BaseModel):
+    product_id: int
+    quantity: int
+    unit_cost: float | None = None
+
+
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int
+    notes: str | None = None
+    items: list[PurchaseOrderItemCreate]
+
+
+class PurchaseOrderItemOut(BaseModel):
+    id: int
+    product_id: int
+    product_title_en: str
+    product_title_zh: str
+    isbn: str | None = None
+    quantity_ordered: int
+    quantity_received: int
+    unit_cost: float
+
+
+class PurchaseOrderOut(BaseModel):
+    id: int
+    po_number: str
+    supplier_id: int
+    supplier_name: str
+    status: str
+    total_cost: float
+    notes: str | None = None
+    created_by_name: str
+    ordered_at: datetime
+    received_at: datetime | None = None
+    created_at: datetime
+    items: list[PurchaseOrderItemOut]
+
+
+class PurchaseOrderReceiveRequest(BaseModel):
+    target_location_id: int
+    condition: str = "brand_new"
+    notes: str | None = None
+
+
 
