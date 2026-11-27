@@ -212,6 +212,7 @@ class OrderCreate(BaseModel):
     recipient_phone: str | None = None
     shipping_address: str | None = None
     delivery_notes: str | None = None
+    coupon_code: str | None = None
 
 
 class OrderItemOut(BaseModel):
@@ -240,6 +241,8 @@ class OrderOut(BaseModel):
     delivery_notes: str | None = None
     tracking_number: str | None = None
     estimated_delivery: str | None = None
+    coupon_code: str | None = None
+    discount_amount: float = 0.0
     created_at: datetime
     items: list[OrderItemOut] = []
 
@@ -535,6 +538,123 @@ class PurchaseOrderReceiveRequest(BaseModel):
     target_location_id: int
     condition: str = "brand_new"
     notes: str | None = None
+
+
+# ===================== REVIEWS & RATINGS SCHEMAS =====================
+
+class ReviewCreate(BaseModel):
+    rating: int  # 1 to 5
+    title: str | None = None
+    comment: str
+
+
+class ReviewOut(BaseModel):
+    id: int
+    product_id: int
+    user_id: int
+    user_name: str
+    rating: int
+    title: str | None = None
+    comment: str
+    is_verified_purchase: bool
+    created_at: datetime
+
+
+class ReviewSummaryOut(BaseModel):
+    average_rating: float
+    total_reviews: int
+    rating_distribution: dict[int, int]
+    reviews: list[ReviewOut]
+
+
+# ===================== WISHLIST SCHEMAS =====================
+
+class WishlistItemOut(BaseModel):
+    id: int
+    product_id: int
+    title_en: str
+    title_zh: str
+    author_en: str
+    price: float
+    image_url: str
+    isbn: str | None = None
+    created_at: datetime
+
+
+# ===================== PROMO & COUPON SCHEMAS =====================
+
+class CouponValidateRequest(BaseModel):
+    code: str
+    cart_subtotal: float
+
+
+class CouponValidateResponse(BaseModel):
+    valid: bool
+    code: str
+    discount_amount: float
+    discount_type: str
+    discount_value: float
+    message: str
+
+
+class CouponOut(BaseModel):
+    id: int
+    code: str
+    description: str | None = None
+    discount_type: str
+    discount_value: float
+    min_spend: float
+    max_discount: float | None = None
+    expires_at: datetime | None = None
+    is_active: bool
+    usage_count: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ===================== FINANCIAL & DEAD STOCK ANALYTICS SCHEMAS =====================
+
+class CategorySalesBreakdown(BaseModel):
+    category_id: int
+    category_name: str
+    total_units_sold: int
+    gross_revenue: float
+    gross_profit: float
+    margin_percent: float
+
+
+class FinancialAnalyticsOut(BaseModel):
+    total_gross_revenue: float
+    total_cogs: float
+    total_gross_profit: float
+    gross_margin_percent: float
+    total_orders_count: int
+    average_order_value: float
+    category_breakdown: list[CategorySalesBreakdown]
+
+
+class DeadStockItemOut(BaseModel):
+    product_id: int
+    title_en: str
+    title_zh: str
+    isbn: str | None = None
+    category_name: str
+    days_since_last_sale: int
+    total_on_hand: int
+    unit_cost: float
+    capital_tied_up: float
+    recommendation: str
+
+
+# ===================== BARCODE / QR SCANNER SCHEMAS =====================
+
+class BarcodeLookupResult(BaseModel):
+    scanned_code: str
+    entity_type: str  # 'LOCATION' or 'PRODUCT' or 'UNKNOWN'
+    location_details: dict | None = None
+    product_details: dict | None = None
+
 
 
 

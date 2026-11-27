@@ -23,10 +23,13 @@ def test_auth_security_suite():
         db.add(test_user)
         db.commit()
 
-    # Clear any previous test lockouts
-    _email_lockouts.pop(bot_target_email, None)
-    _ip_lockouts.pop("testclient", None)
-    _ip_lockouts.pop("127.0.0.1", None)
+    # Clear any previous test lockouts and test client failed attempts from DB
+    _email_lockouts.clear()
+    _ip_lockouts.clear()
+    db.query(models.S00_LoginAttempt).filter(
+        (models.S00_LoginAttempt.email == bot_target_email) | (models.S00_LoginAttempt.ip_address.in_(["testclient", "127.0.0.1"]))
+    ).delete(synchronize_session=False)
+    db.commit()
 
     # Perform 5 consecutive failed login attempts
     last_status = None

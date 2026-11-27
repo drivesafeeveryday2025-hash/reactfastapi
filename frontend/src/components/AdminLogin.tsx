@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_URL } from "../services/api";
 
 interface AdminLoginProps {
   onLoginSuccess: (token: string, user: { id: number; email: string; role?: string }) => void;

@@ -17,14 +17,14 @@ Whenever you open VS Code to work on this project, press **``Ctrl + ` ``** (Ctrl
    ```
    *(You should see `(.venv)` appear on the left of your terminal prompt).*
 
-2. Start the FastAPI server with live auto-reload:
+2. Start the FastAPI server with live auto-reload (Port `8001`):
    ```powershell
-   uvicorn app.main:app --reload
+   uvicorn app.main:app --reload --port 8001
    ```
 
 3. **Verify:**
-   - Backend API: `http://localhost:8000`
-   - Interactive API Docs (Swagger): `http://localhost:8000/docs`
+   - Backend API: `http://localhost:8001`
+   - Interactive API Docs (Swagger): `http://localhost:8001/docs`
 
 ---
 
@@ -53,7 +53,7 @@ Whenever you open VS Code to work on this project, press **``Ctrl + ` ``** (Ctrl
 | **Customer Storefront** | `http://localhost:5173/` | Customer-facing bookstore: browsing, cart, checkout, AI support |
 | **Manager Admin Portal** | `http://localhost:5173/admin` | Management portal: KPI metrics, book inventory, bulk import, audit logs |
 | **Manager Login Page** | `http://localhost:5173/admin/login` | Dedicated sign-in page for store managers and administrative staff |
-| **FastAPI Swagger Docs** | `http://localhost:8000/docs` | Test backend endpoints, inspect schemas and API definitions |
+| **FastAPI Swagger Docs** | `http://localhost:8001/docs` | Test backend endpoints, inspect schemas and API definitions |
 | **PostgreSQL Database** | Port `5432` / DB: `appdb` | Inspect tables via **pgAdmin 4** (`S00_` and `C00_` tables) |
 
 ---
@@ -154,7 +154,7 @@ python seed.py
    - Make sure your PostgreSQL Windows Service is running.
    - Check [backend/.env](file:///d:/tempA/reactfull/backend/.env) to ensure `DATABASE_URL` has your correct password.
 
-2. **"Port 8000 or 5173 is already in use":**
+2. **"Port 8001 or 5173 is already in use":**
    - Check if you have an old terminal window still running in the background. Close it or press `Ctrl + C`.
 
 3. **PowerShell blocks script activation (`Activate.ps1`):**

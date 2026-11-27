@@ -212,6 +212,7 @@ class C00_Product(Base):
     detail: Mapped["C00_ProdDetail"] = relationship(
         back_populates="product", uselist=False, cascade="all, delete-orphan"
     )
+    reviews: Mapped[list["C00_Review"]] = relationship(back_populates="product", cascade="all, delete-orphan")
 
 
 class C00_ProdDetail(Base):
@@ -248,6 +249,8 @@ class C00_Order(Base):
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     estimated_delivery: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    coupon_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    discount_amount: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -267,6 +270,56 @@ class C00_OrderItem(Base):
 
     order: Mapped["C00_Order"] = relationship(back_populates="items")
     product: Mapped["C00_Product"] = relationship()
+
+
+class C00_Review(Base):
+    __tablename__ = "C00_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("C00_products.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("S00_users.id", ondelete="CASCADE"), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    comment: Mapped[str] = mapped_column(Text)
+    is_verified_purchase: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    product: Mapped["C00_Product"] = relationship(back_populates="reviews")
+    user: Mapped["S00_User"] = relationship()
+
+
+class C00_Wishlist(Base):
+    __tablename__ = "C00_wishlists"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("S00_users.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("C00_products.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["S00_User"] = relationship()
+    product: Mapped["C00_Product"] = relationship()
+
+
+class C00_Coupon(Base):
+    __tablename__ = "C00_coupons"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    discount_type: Mapped[str] = mapped_column(String(20), default="PERCENT")  # PERCENT or FIXED
+    discount_value: Mapped[float] = mapped_column(Float)
+    min_spend: Mapped[float] = mapped_column(Float, default=0.0)
+    max_discount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class C00_NavigationMenu(Base):
